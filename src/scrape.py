@@ -1,20 +1,3 @@
-"""
-Etapa 1 — coleta de dados de tabuademares.com/br/paraiba/joao-pessoa.
-
-Objetivo: gravar em data/raw/ os CSVs que as Etapas 2 e 3 vão consumir.
-
-    mares_<ano>.csv      tábua de marés do ano (4 marés por dia)
-    mares_previsao.csv   marés do mês corrente, para cruzar com a previsão
-    ondas.csv            altura de onda hora a hora (~7 dias à frente)
-    vento.csv            velocidade do vento hora a hora (~7 dias à frente)
-
-As funções abaixo estão vazias de propósito. Abra o site no navegador, use o
-DevTools para descobrir onde cada dado vive no HTML e implemente o parse.
-As colunas de cada CSV são sua decisão — só precisam sustentar as etapas
-seguintes (ver README).
-
-Rodar com: uv run python src/scrape.py
-"""
 import re
 import time
 from datetime import datetime
@@ -160,56 +143,51 @@ def main(ano: int = 2025) -> None:
     DIR_RAW.mkdir(parents=True, exist_ok=True) 
     hoje = datetime.now()
 
-# #marés:
-#     html = bloco_cache(URL_BASE, "mares.html")
-#     mares = parsear_mares(html, hoje.year, hoje.month)
+#marés:
+    html = bloco_cache(URL_BASE, "mares.html")
+    mares = parsear_mares(html, hoje.year, hoje.month)
 
-#     pd.DataFrame(mares).to_csv(DIR_RAW / "mares_previsao.csv", index=False)
+    pd.DataFrame(mares).to_csv(DIR_RAW / "mares_previsao.csv", index=False)
 
-#     print(f"Quantidade de linhas de mares_previsao.csv: {len(mares)}")
-#     print(pd.read_csv(DIR_RAW / "mares_previsao.csv").head()) #Lê o CSV de volta e pega as 5 primeiras linhas
-
-# #vento:
-#     html = bloco_cache(URL_VENTO, "vento.html")
-#     vento = parsear_previsao(html, hoje.year)
-
-#     pd.DataFrame(vento).rename(
-#         columns={"segundo_campo": "direcao", "valor": "velocidade"}
-#     ).to_csv(DIR_RAW / "vento.csv", index=False)
-
-#     print(pd.read_csv(DIR_RAW / "vento.csv").head())
-#     print(f"Quantidade de linhas de vento.csv: {len(vento)}")
+    print(f"Quantidade de linhas de mares_previsao.csv: {len(mares)}")
 
 
-# #ondas:
-#     html = bloco_cache(URL_ONDAS, "ondas.html")
-#     ondas = parsear_previsao(html, hoje.year)
+#vento:
+    html = bloco_cache(URL_VENTO, "vento.html")
+    vento = parsear_previsao(html, hoje.year)
 
-#     pd.DataFrame(ondas).rename(
-#         columns={"segundo_campo": "direcao", "valor": "altura(m)"}
-#     ).to_csv(DIR_RAW / "ondas.csv", index=False)
+    pd.DataFrame(vento).rename(
+        columns={"segundo_campo": "direcao", "valor": "velocidade"}
+    ).to_csv(DIR_RAW / "vento.csv", index=False)
 
-#     print(pd.read_csv(DIR_RAW / "ondas.csv").head())
-#     print(f"Quantidade de linhas de ondas.csv: {len(ondas)}")
+    print(f"Quantidade de linhas de vento.csv: {len(vento)}")
+
+
+#ondas:
+    html = bloco_cache(URL_ONDAS, "ondas.html")
+    ondas = parsear_previsao(html, hoje.year)
+
+    pd.DataFrame(ondas).rename(
+        columns={"segundo_campo": "direcao", "valor": "altura(m)"}
+    ).to_csv(DIR_RAW / "ondas.csv", index=False)
+
+    print(f"Quantidade de linhas de ondas.csv: {len(ondas)}")
     
 
-# #chuva
-#     html = bloco_cache(URL_CHUVA, "probabilidade-chuva.html")
-#     chuva = parsear_previsao(html, hoje.year)
+#chuva
+    html = bloco_cache(URL_CHUVA, "probabilidade-chuva.html")
+    chuva = parsear_previsao(html, hoje.year)
 
-#     pd.DataFrame(chuva).rename(
-#         columns={"segundo_campo": "altura_chuva(mm)", "valor": "probabilidade(%)"}
-#     ).to_csv(DIR_RAW / "probabilidade-chuva.csv", index=False)
+    pd.DataFrame(chuva).rename(
+        columns={"segundo_campo": "altura_chuva(mm)", "valor": "probabilidade(%)"}
+    ).to_csv(DIR_RAW / "probabilidade-chuva.csv", index=False)
 
-#     print(pd.read_csv(DIR_RAW / "probabilidade-chuva.csv").head())
-#     print(f"Quantidade de linhas de probabilidade-chuva.csv: {len(chuva)}")
+    print(f"Quantidade de linhas de probabilidade-chuva.csv: {len(chuva)}")
 
 #marés do ano:
     mares_do_ano = coletar_mares_do_ano(ano)
     mares_do_ano.to_csv(DIR_RAW / f"mares_{ano}.csv", index=False)
     print(f"Quantidade de linhas de mares_{ano}.csv: {len(mares_do_ano)}")
-    print(mares_do_ano["data"].iloc[0])
-    print(mares_do_ano["data"].iloc[-1])
 
 
 if __name__ == "__main__":
