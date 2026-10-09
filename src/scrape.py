@@ -15,7 +15,7 @@ seguintes (ver README).
 
 Rodar com: uv run python src/scrape.py
 """
-
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -24,14 +24,14 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
-# Os imports acima são o ponto de partida: você vai usar todos eles.
-# Seu editor pode marcá-los como não usados até você preencher as funções.
+
 
 URL_BASE = "https://tabuademares.com/br/paraiba/joao-pessoa"
 URL_ONDAS = f"{URL_BASE}/previsao/ondas"
 URL_VENTO = f"{URL_BASE}/previsao/vento"
+URL_CHUVA = f"{URL_BASE}/previsao/probabilidade-chuva"
 
-# Servidores rejeitam clientes sem User-Agent. Identifique-se.
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -40,71 +40,176 @@ HEADERS = {
     )
 }
 
-# Segundos de pausa entre requests. Não tire isso.
+
 PAUSA = 1.5
 
 DIR_RAW = Path(__file__).resolve().parent.parent / "data" / "raw"
 
 
 def baixar_html(url: str, dados_post: dict | None = None) -> str:
-    """Baixa uma página e devolve o HTML.
 
-    Use POST (passando `dados_post`) quando a página só devolver o conteúdo
-    que você quer em resposta a um formulário; GET no resto.
+    if dados_post is None:
+        resp = requests.get(url, headers=HEADERS)
+        
+    else:
+        resp = requests.post(url, data=dados_post, headers=HEADERS)
 
-    TODO: fazer a requisição com `requests`, checar o status e devolver o texto.
-    Dica: `resp.raise_for_status()` falha alto quando o servidor recusa.
-    """
-    raise NotImplementedError
+    resp.raise_for_status()
 
+    return resp.text
+
+def bloco_cache(url: str, nome: str, dados_post: dict | None = None) -> str:
+    arquivo = DIR_RAW / nome
+    if not arquivo.exists():
+        arquivo.write_text(baixar_html(url, dados_post), encoding="utf-8")
+        time.sleep(PAUSA)
+    return arquivo.read_text(encoding="utf-8")
 
 def parsear_mares(html: str, ano: int, mes: int) -> list[dict]:
-    """Extrai da tábua mensal uma linha por evento de maré.
+    soup = BeautifulSoup(html, "html.parser")
+    tabela = soup.find("table", id="tabla_mareas")
+    ocorrencia_mares = []
 
-    Cada dia tem cerca de 4 eventos (duas altas, duas baixas). Além de
-    horário e altura, a página traz informação de coeficiente de maré e de
-    fase da lua — decida o que vale a pena capturar.
+    for linha in tabela.find_all("tr", onclick=True):
+        texto_data = linha["onclick"]
+        coeficiente = linha.find("div", class_="tabla_mareas_coeficiente_numero")
 
-    TODO: localizar a tabela no HTML e percorrer as linhas.
-    """
-    raise NotImplementedError
+        if coeficiente is None:
+            texto_coeficiente = ""
+        else:
+            texto_coeficiente = coeficiente.get_text(" ", strip=True)
+
+                
+        for mare in linha.find_all("td", class_="tabla_mareas_marea"):
+            texto_mare = mare.get_text(" ", strip=True)
+
+            if texto_mare == "":
+                continue
+
+            bloco_tipo = mare.find("div", class_="tabla_mareas_marea_bajamar_pleamar")
+
+            if "tabla_mareas_marea_pleamar" in bloco_tipo.get("class"):
+                tipo = "alta"
+            else:
+                tipo = "baixa"
+
+            ocorrencia_mares.append({
+                "data": texto_data,
+                "mare": texto_mare,
+                "tipo_mare": tipo,
+                "coeficiente": texto_coeficiente,
+            })
+
+    return ocorrencia_mares
+            
 
 
 def parsear_previsao(html: str, ano: int) -> list[dict]:
-    """Extrai leituras horárias das páginas de previsão de onda e de vento.
+    soup = BeautifulSoup(html, "html.parser")
+    ocorrencia_previsao = []
 
-    As duas páginas têm o mesmo layout: um bloco por dia, com uma linha por
-    hora dentro. Uma função só deve dar conta das duas.
+    for dia in soup.find_all("div", class_="f_cont"):
+        texto_dia = dia.find("div", class_="f_fecha").get_text(" ", strip=True)
+        
+        if texto_dia == "":
+            continue
 
-    TODO: percorrer os blocos de dia e, dentro deles, as linhas de hora.
-    Atenção à data: o bloco mostra dia e mês abreviado, sem o ano.
-    """
-    raise NotImplementedError
+        for hora in dia.find_all("div", class_="f_temp_horas"):
+            elemento = hora.find_all("div", class_="f_temp_hora")
+
+            if not elemento:
+                continue
+
+            hora_dia = elemento[0].get_text(strip=True)
+            segundo_campo = elemento[1].get_text(strip=True)
+
+            campo = hora.find("div", class_="grafico_temp_barra_relleno")
+
+            if campo is None:
+                continue
+
+            valor = campo.get_text(strip=True)
+
+            ocorrencia_previsao.append({
+                "ano": ano,
+                "dia": texto_dia,
+                "hora_dia": hora_dia,
+                "segundo_campo": segundo_campo,
+                "valor": valor,
+            })
+
+    return ocorrencia_previsao
+
 
 
 def coletar_mares_do_ano(ano: int) -> pd.DataFrame:
-    """Junta os 12 meses da tábua de marés de `ano` num DataFrame.
+    mares_ano = []
 
-    TODO: iterar de janeiro a dezembro, chamar `baixar_html` + `parsear_mares`
-    e dormir `PAUSA` entre requisições.
-    """
-    raise NotImplementedError
+    for mes in range(1, 13):
+        fecha = f"{ano}-{mes:02d}-01"
+        html = bloco_cache(URL_BASE, f"mares_dia_{fecha}.html", {"fecha": fecha})
+        mares = parsear_mares(html, ano, mes)
+        mares_ano.extend(mares)
+
+    return pd.DataFrame(mares_ano)
+        
+
 
 
 def main(ano: int = 2025) -> None:
-    DIR_RAW.mkdir(parents=True, exist_ok=True)
+    DIR_RAW.mkdir(parents=True, exist_ok=True) 
     hoje = datetime.now()
 
-    # TODO: montar os quatro CSVs em DIR_RAW.
-    #
-    #   1. tábua de marés do ano inteiro   -> mares_{ano}.csv
-    #   2. marés do mês corrente           -> mares_previsao.csv
-    #   3. previsão de ondas               -> ondas.csv
-    #   4. previsão de vento               -> vento.csv
-    #
-    # Imprima quantas linhas cada arquivo recebeu: um CSV vazio é o erro mais
-    # comum e o mais silencioso.
-    raise NotImplementedError
+# #marés:
+#     html = bloco_cache(URL_BASE, "mares.html")
+#     mares = parsear_mares(html, hoje.year, hoje.month)
+
+#     pd.DataFrame(mares).to_csv(DIR_RAW / "mares_previsao.csv", index=False)
+
+#     print(f"Quantidade de linhas de mares_previsao.csv: {len(mares)}")
+#     print(pd.read_csv(DIR_RAW / "mares_previsao.csv").head()) #Lê o CSV de volta e pega as 5 primeiras linhas
+
+# #vento:
+#     html = bloco_cache(URL_VENTO, "vento.html")
+#     vento = parsear_previsao(html, hoje.year)
+
+#     pd.DataFrame(vento).rename(
+#         columns={"segundo_campo": "direcao", "valor": "velocidade"}
+#     ).to_csv(DIR_RAW / "vento.csv", index=False)
+
+#     print(pd.read_csv(DIR_RAW / "vento.csv").head())
+#     print(f"Quantidade de linhas de vento.csv: {len(vento)}")
+
+
+# #ondas:
+#     html = bloco_cache(URL_ONDAS, "ondas.html")
+#     ondas = parsear_previsao(html, hoje.year)
+
+#     pd.DataFrame(ondas).rename(
+#         columns={"segundo_campo": "direcao", "valor": "altura(m)"}
+#     ).to_csv(DIR_RAW / "ondas.csv", index=False)
+
+#     print(pd.read_csv(DIR_RAW / "ondas.csv").head())
+#     print(f"Quantidade de linhas de ondas.csv: {len(ondas)}")
+    
+
+# #chuva
+#     html = bloco_cache(URL_CHUVA, "probabilidade-chuva.html")
+#     chuva = parsear_previsao(html, hoje.year)
+
+#     pd.DataFrame(chuva).rename(
+#         columns={"segundo_campo": "altura_chuva(mm)", "valor": "probabilidade(%)"}
+#     ).to_csv(DIR_RAW / "probabilidade-chuva.csv", index=False)
+
+#     print(pd.read_csv(DIR_RAW / "probabilidade-chuva.csv").head())
+#     print(f"Quantidade de linhas de probabilidade-chuva.csv: {len(chuva)}")
+
+#marés do ano:
+    mares_do_ano = coletar_mares_do_ano(ano)
+    mares_do_ano.to_csv(DIR_RAW / f"mares_{ano}.csv", index=False)
+    print(f"Quantidade de linhas de mares_{ano}.csv: {len(mares_do_ano)}")
+    print(mares_do_ano["data"].iloc[0])
+    print(mares_do_ano["data"].iloc[-1])
 
 
 if __name__ == "__main__":
